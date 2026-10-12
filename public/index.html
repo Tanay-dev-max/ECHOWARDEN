@@ -1,0 +1,102 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>EchoWarden - Ranger Dashboard</title>
+<style>
+  :root { --bg:#0f1d16; --card:#17301f; --ink:#eef3ea; --muted:#9db3a3; --line:#2b4a36; --gold:#d9a441;
+          --LOW:#5c8a54; --MEDIUM:#d9a441; --HIGH:#e07a3f; --CRITICAL:#d9453b; }
+  * { box-sizing:border-box; }
+  body { margin:0; font-family: Calibri, Arial, sans-serif; background:var(--bg); color:var(--ink); }
+  header { padding:18px 24px; border-bottom:1px solid var(--line); display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:12px; }
+  h1 { margin:0; font-size:22px; } h1 span { color:var(--gold); }
+  h2 { font-size:13px; letter-spacing:.08em; text-transform:uppercase; color:var(--gold); margin:0 0 10px; }
+  main { display:grid; grid-template-columns: 1fr 1fr; gap:16px; padding:16px 24px; }
+  @media (max-width:900px){ main{grid-template-columns:1fr;} }
+  .card { background:var(--card); border:1px solid var(--line); border-radius:12px; padding:16px; }
+  button, select { background:#22452e; color:var(--ink); border:1px solid var(--line); border-radius:8px; padding:8px 12px; font-size:14px; cursor:pointer; }
+  button:hover { background:#2d5a3b; }
+  .row { display:flex; gap:8px; flex-wrap:wrap; align-items:center; }
+  .muted { color:var(--muted); font-size:13px; }
+  .tag { display:inline-block; padding:2px 8px; border-radius:999px; font-size:12px; font-weight:bold; color:#10170f; }
+  .LOW{background:var(--LOW)} .MEDIUM{background:var(--MEDIUM)} .HIGH{background:var(--HIGH)} .CRITICAL{background:var(--CRITICAL);color:#fff}
+  .bar { height:10px; background:#10170f; border-radius:6px; overflow:hidden; margin:6px 0 12px; }
+  .bar > div { height:100%; transition:width .4s; }
+  .item { padding:10px 0; border-bottom:1px solid var(--line); font-size:14px; }
+  .item:last-child { border-bottom:none; }
+  .dismissed { opacity:.45; text-decoration:line-through; }
+  .scroll { max-height:340px; overflow:auto; }
+  .flash { animation: flash 1s; } @keyframes flash { from{background:#5a2420} to{background:transparent} }
+  .full { grid-column: 1 / -1; }
+</style>
+</head>
+<body>
+<header>
+  <h1>Echo<span>Warden</span> <span class="muted" style="color:var(--muted)">- Ranger Dashboard</span></h1>
+  <div class="row">
+    <span class="muted">AI model:</span>
+    <select id="provider"><option value="edge">Edge (TFLite)</option><option value="cloud">Cloud</option><option value="mock">Mock</option></select>
+    <label class="muted"><input type="checkbox" id="cloudOnline" checked> Cloud online</label>
+    <span id="aiNotice" class="muted"></span>
+  </div>
+</header>
+<main>
+  <section class="card full">
+    <h2>Simulate sensor audio</h2>
+    <div class="row">
+      <button data-kind="gunshot">Gunshot</button>
+      <button data-kind="engine">Chainsaw / Engine</button>
+      <button data-kind="vehicle">Heavy vehicle</button>
+      <button data-kind="species">Animal distress call</button>
+      <button data-kind="ambient">Ambient wind</button>
+      <button id="burst">Poaching burst (3 events)</button>
+    </div>
+    <p class="muted" id="last"></p>
+  </section>
+
+  <section class="card"><h2>Zone threat levels (Composite)</h2><div id="zones"></div></section>
+  <section class="card"><h2>Ranger alerts (Observer)</h2><div id="alerts" class="scroll"></div></section>
+  <section class="card full"><h2>Event log - dismiss false alarms / undo (Memento)</h2><div id="events" class="scroll"></div></section>
+</main>
+<script>
+const $ = (id) => document.getElementById(id);
+const api = (path, method = "GET", body) =>
+  fetch(path, { method, headers: { "Content-Type": "application/json" }, body: body ? JSON.stringify(body) : undefined }).then((r) => r.json());
+
+async function refresh() {
+  const [tree, events, alerts, status] = await Promise.all([api("/api/tree"), api("/api/events"), api("/api/alerts"), api("/api/ai/status")]);
+  $("provider").value = status.preferred; $("cloudOnline").checked = status.cloudOnline;
+
+  $("zones").innerHTML = tree.children.map((z) => `
+    <div><b>${z.id}</b> <span class="tag ${z.level}">${z.level}</span> <span class="muted">${(z.score * 100).toFixed(0)}%</span>
+    <div class="bar"><div class="${z.level}" style="width:${Math.max(3, z.score * 100)}%;background:var(--${z.level})"></div></div></div>`).join("");
+
+  $("alerts").innerHTML = alerts.length ? alerts.map((a) => `<div class="item">${a.message}</div>`).join("") : '<p class="muted">No alerts yet - simulate a sound.</p>';
+
+  $("events").innerHTML = events.map((e) => `
+    <div class="item ${e.dismissed ? "dismissed" : ""}">
+      <b>${e.label.toUpperCase()}</b> @ ${e.sensorId} - ${(e.confidence * 100).toFixed(0)}% - model: ${e.provider}
+      ${e.confirmed ? '<span class="tag HIGH">ALERT</span>' : ""} ${e.notice ? `<span class="tag MEDIUM">fallback</span>` : ""}
+      ${e.drone && e.drone.dispatched ? '<span class="tag CRITICAL">DRONE</span>' : ""}
+      <span class="muted">[${(e.filters || []).join(", ") || "no filters"}]</span>
+      <div class="bar"><div style="width:${e.confidence * 100}%;background:var(--gold)"></div></div>
+      ${e.confirmed ? (e.dismissed ? `<button onclick="act(${e.id},'undo')">Undo</button>` : `<button onclick="act(${e.id},'dismiss')">Dismiss false alarm</button>`) : ""}
+    </div>`).join("") || '<p class="muted">Nothing detected yet.</p>';
+}
+async function act(id, what) { await api(`/api/events/${id}/${what}`, "POST"); refresh(); }
+async function sim(kind) {
+  const e = await api(`/api/simulate/${kind}`, "POST", {});
+  $("last").textContent = e.description + (e.notice ? "  [" + e.notice + "]" : "");
+  refresh();
+}
+document.querySelectorAll("[data-kind]").forEach((b) => b.onclick = () => sim(b.dataset.kind));
+$("burst").onclick = async () => { for (const k of ["gunshot", "engine", "gunshot"]) { await sim(k); await new Promise((r) => setTimeout(r, 400)); } };
+$("provider").onchange = async (e) => { await api("/api/ai/provider", "POST", { name: e.target.value }); refresh(); };
+$("cloudOnline").onchange = async (e) => { await api("/api/ai/cloud", "POST", { online: e.target.checked }); refresh(); };
+
+new EventSource("/api/stream").onmessage = () => refresh();
+refresh();
+</script>
+</body>
+</html>

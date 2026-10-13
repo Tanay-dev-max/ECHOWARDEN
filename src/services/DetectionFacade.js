@@ -7,6 +7,15 @@
 const { ReserveNode, ZoneNode, SensorNode, AudioEventNode, buildStream, levelOf } = require("../domain/structural");
 const { ThreatEventSubject, Incident, IncidentCaretaker } = require("../domain/behavioral");
 
+const REQUIRED_FEATURES = ["impulsiveness", "centroid", "durationMs", "periodicity", "rms"];
+
+function validateFeatures(f) {
+  if (!f || typeof f !== "object") throw new Error("features must be an object");
+  for (const k of REQUIRED_FEATURES) {
+    if (typeof f[k] !== "number" || !Number.isFinite(f[k])) throw new Error(`features.${k} must be a finite number`);
+  }
+}
+
 class DetectionFacade {
   constructor({ ai, observers = [] }) {
     this.ai = ai;
@@ -35,6 +44,7 @@ class DetectionFacade {
   ingestEvent(sensorId, rawFeatures) {
     const sensor = this.sensors.get(sensorId);
     if (!sensor) throw new Error(`Unknown sensor: ${sensorId}`);
+    validateFeatures(rawFeatures);
     const profile = sensor.profile;
 
     const features = buildStream(rawFeatures, profile).read();     // Decorator

@@ -88,6 +88,13 @@ test("Composite rolls up: reserve level = max of zones", () => {
   const maxZone = Math.max(...tree.children.map((z) => z.score));
   assert.strictEqual(tree.score, maxZone);
 });
+test("Bad features are rejected, never recorded as NaN events", () => {
+  const { facade } = createSystem();
+  assert.throws(() => facade.ingestEvent("S-01", {}), /features\.impulsiveness/);
+  assert.throws(() => facade.ingestEvent("S-01", { ...sample("gunshot"), rms: "loud" }), /features\.rms/);
+  assert.throws(() => facade.ingestEvent("S-01", null), /features must be an object/);
+  assert.strictEqual(facade.getEvents().length, 0);
+});
 test("Unknown sensor rejected", () => {
   const { facade } = createSystem();
   assert.throws(() => facade.ingestEvent("NOPE", sample("gunshot")), /Unknown sensor/);
